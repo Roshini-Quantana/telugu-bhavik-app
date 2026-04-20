@@ -1,9 +1,5 @@
 import logging
-import asyncio
-import re
-import os
 from dotenv import load_dotenv
-
 from livekit.agents import JobContext, WorkerOptions, cli
 from livekit.agents.voice import Agent, AgentSession
 from livekit.plugins import google, sarvam
@@ -11,151 +7,171 @@ from livekit.plugins import google, sarvam
 # Load env
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
+# Logging
 logger = logging.getLogger("voice-agent")
+logger.setLevel(logging.INFO)
 
 
 class VoiceAgent(Agent):
-    def __init__(self, room) -> None:
-        self.step = 0
-        self.room = room
+    def __init__(self) -> None:
+        self.mode = "SALES"  # SALES → PD
 
         super().__init__(
+
+            # 🧠 MASTER INSTRUCTIONS (Sales + PD)
             instructions="""
-You are Telugu Bhavik, a Telugu voice assistant for Vridhi housing loans.
+You are Telugu Bhavik, an AI voice agent for Vridhi housing loans.
+
+You operate in TWO MODES:
+
+=====================
+MODE 1: SALES AGENT
+=====================
+Goal:
+- Introduce housing loans (14–15%)
+- Ask questions step-by-step:
+  - Monthly income
+  - Job type
+  - Location
+  - Property stage
+  - Loan amount
 
 Rules:
-- Speak natural Telugu
-- Be friendly
-- Ask one question at a time
-- Keep responses short
+- Speak Telugu naturally (mix English if needed)
+- Be friendly and conversational
+- Ask ONE question at a time
+- Keep answers short
+
+Lead Types:
+- HOT → ready now
+- WARM → interested later
+- COLD → not interested
+
+If HOT:
+Say:
+"మా సీనియర్ టీమ్ మీతో త్వరలో సంప్రదిస్తుంది"
+
+Then MOVE to PD mode.
+
+If COLD:
+Politely end conversation.
+
+=====================
+MODE 2: PD AGENT
+=====================
+Goal:
+Collect verification details.
+
+Ask:
+- Employment details
+- Income stability
+- Existing loans
+- Family details
+- Property details
+
+Rules:
+- Be formal
+- Ask ONE question at a time
+- Do not skip
+
+At end:
+Summarize clearly.
+
+=====================
+IMPORTANT:
+- Start in SALES mode
+- If user shows strong intent → switch to PD
+- Keep conversation natural
 """,
 
-            # 🎤 STT
+            # 🎤 Speech to Text
             stt=sarvam.STT(
-                language="te-IN",
+                language="en-IN",
                 model="saaras:v3",
                 mode="transcribe"
             ),
 
-            # 🧠 LLM
-            llm=google.LLM(
-                model="gemini-1.5-flash"
-            ),
+            # 🧠 Gemini LLM
+            llm=google.LLM(model="gemini-2.5-flash"),
 
-            # 🔊 TTS (TELUGU FIX)
+            # 🔊 Text to Speech
             tts=sarvam.TTS(
-                target_language_code="te-IN",
+                target_language_code="en-IN",
                 model="bulbul:v3",
                 speaker="shubh"
             ),
         )
 
-    async def on_user_message(self, message: str):
-        logger.info(f"👤 User: {message}")
+        logger.info("VoiceAgent initialized")
 
+    # 👋 When user joins
+    async def on_enter(self):
+        logger.info("User joined → starting SALES flow")
+
+        await self.session.generate_reply(
+            instructions="""
+You are in SALES mode.
+
+Greet the user warmly in Telugu.
+
+Introduce Vridhi housing loans briefly (14–15%).
+
+Then ask first question:
+"What is your monthly income?"
+"""
+        )
+
+    # 🔥 Detect user input and switch mode
+    async def on_user_message(self, message: str):
         text = message.lower()
 
-        # STEP 1
-        if self.step == 0:
-            self.step = 1
+        # Detect HOT lead
+        if self.mode == "SALES" and (
+            "ఇప్పుడే" in text or
+            "immediate" in text or
+            "now" in text
+        ):
+            logger.info("HOT lead detected → switching to PD")
 
-            await self.session.generate_reply(
-                instructions="మీ పేరు చెప్పగలరా?"
-            )
-            return
-
-        # STEP 2
-        elif self.step == 1:
-            self.step = 2
-
-            await self.session.generate_reply(
-                instructions="మీ నెలవారీ ఆదాయం ఎంత?"
-            )
-            return
-
-        # STEP 3
-        elif self.step == 2:
-            self.step = 3
-
-            await self.session.generate_reply(
-                instructions="మీరు ఉద్యోగం చేస్తున్నారా లేక బిజినెస్ చేస్తున్నారా?"
-            )
-            return
-
-        # STEP 4
-        elif self.step == 3:
-            self.step = 4
-
-            await self.session.generate_reply(
-                instructions="మీకు ఎంత లోన్ కావాలి?"
-            )
-            return
-
-        # FINAL STEP
-        elif self.step == 4:
-
-            if "no" in text or "అవసరం లేదు" in text:
-                await self.session.generate_reply(
-                    instructions="సరే, ధన్యవాదాలు!"
-                )
-
-                await asyncio.sleep(2)
-                await self.session.aclose()
-                await self.room.disconnect()
-                return
+            self.mode = "PD"
 
             await self.session.generate_reply(
                 instructions="""
-ధన్యవాదాలు!
+User is a HOT lead.
 
-మా టీమ్ త్వరలో మీతో సంప్రదిస్తుంది.
+Say:
+"మా సీనియర్ టీమ్ మీతో త్వరలో సంప్రదిస్తుంది"
+
+Now switch to PD mode.
+
+Ask first PD question:
+"What is your employment type?"
 """
             )
 
-            await asyncio.sleep(2)
-            await self.session.aclose()
-            await self.room.disconnect()
 
-
-# 🚀 FIXED ENTRYPOINT (IMPORTANT PART)
+# 🚀 Entry point (LiveKit)
 async def entrypoint(ctx: JobContext):
-    logger.info("🚀 Connecting to LiveKit...")
+    logger.info(f"Connected to room: {ctx.room.name}")
 
     await ctx.connect()
-    participant = await ctx.wait_for_participant()
+    await ctx.wait_for_participant()
 
-    logger.info("✅ Participant joined")
+    logger.info("Participant joined → starting session")
 
-    agent = VoiceAgent(room=ctx.room)
     session = AgentSession()
 
     await session.start(
-        agent=agent,
+        agent=VoiceAgent(),
         room=ctx.room,
     )
 
-    logger.info("🎤 Agent started")
-
-    # 🔥 CRITICAL FIX → delay before speaking
-    await asyncio.sleep(2)
-
-    # 🔥 FORCE INTRO (this was missing before)
-    await agent.session.generate_reply(
-        instructions="""
-నమస్తే!
-
-నేను వృద్ధి నుండి మాట్లాడుతున్నాను.
-మేము 14–15% వడ్డీతో హౌస్ లోన్స్ అందిస్తున్నాము.
-
-మీకు హౌస్ లోన్ అవసరమా?
-"""
-    )
+    logger.info("Agent is live")
 
 
-# ▶️ Run
+# ▶️ Run app
 if __name__ == "__main__":
-    print("🚀 Starting Telugu Bhavik...")
+    print("🚀 Starting Telugu Bhavik agent...")
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
