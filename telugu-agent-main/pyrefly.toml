@@ -1,0 +1,2 @@
+python-interpreter = "venv311/Scripts/python.exe"
+search-path = ["venv311/Lib/site-packages"]

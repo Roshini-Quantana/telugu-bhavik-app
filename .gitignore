@@ -1,0 +1,18 @@
+# Python
+telugu-agent-main/venv311/
+telugu-agent-main/__pycache__/
+telugu-agent-main/.env
+telugu-agent-main/.vscode/
+*.pyc
+
+# Node.js
+telugu-web-main/node_modules/
+telugu-web-main/.next/
+telugu-web-main/out/
+telugu-web-main/build/
+telugu-web-main/.env*
+telugu-web-main/npm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
