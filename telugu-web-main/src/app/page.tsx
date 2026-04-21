@@ -44,7 +44,7 @@ function AgentUI({ onDisconnect }: { onDisconnect: () => void }) {
   return (
     <div style={cardStyle}>
       <h1 style={titleStyle}>Telugu Bhavik 🎙️</h1>
-      <p style={subtitleStyle}>Your AI Telugu Voice Assistant powered by LiveKit &amp; Sarvam</p>
+      <p style={subtitleStyle}>Your AI Telugu Voice Assistant powered by Quantana</p>
 
       <div style={vizWrapStyle}>
         <BarVisualizer
@@ -136,7 +136,7 @@ export default function Home() {
     <PageWrapper>
       <div style={cardStyle}>
         <h1 style={titleStyle}>Telugu Bhavik 🎙️</h1>
-        <p style={subtitleStyle}>Your AI Telugu Voice Assistant powered by LiveKit &amp; Sarvam</p>
+        <p style={subtitleStyle}>Your AI Telugu Voice Assistant powered by Quantana</p>
 
         <div style={micRingStyle}>🎤</div>
 
