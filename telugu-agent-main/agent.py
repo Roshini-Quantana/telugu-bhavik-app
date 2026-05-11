@@ -618,7 +618,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             port=http_port,
-            agent_name="telugu-bhavik-local",
+            agent_name="telugu-bhavik",
             num_idle_processes=1,
             load_threshold=1.5,
         )

@@ -2,7 +2,7 @@ import { AccessToken, AgentDispatchClient } from "livekit-server-sdk";
 import { NextResponse } from "next/server";
 
 const ROOM_NAME = "telugu-room";
-const AGENT_NAME = "telugu-bhavik-local";
+const AGENT_NAME = "telugu-bhavik";
 
 export async function GET() {
     const apiKey = process.env.LIVEKIT_API_KEY;
