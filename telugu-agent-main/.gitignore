@@ -1,4 +1,5 @@
-
+# Secrets
+creds.json
 
 # Logs and Temp files
 *.log

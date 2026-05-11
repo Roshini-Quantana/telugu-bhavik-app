@@ -17,6 +17,13 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 load_dotenv()
 
+# --- Environment Validation ---
+REQUIRED_ENV_VARS = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "SARVAM_API_KEY", "GOOGLE_API_KEY"]
+missing_vars = [v for v in REQUIRED_ENV_VARS if not os.environ.get(v)]
+if missing_vars:
+    print(f"CRITICAL: Missing environment variables: {', '.join(missing_vars)}")
+    # We don't exit here to allow local debugging, but it will likely fail later.
+
 # ----------------------------------------------------------
 # --- Monkeypatch for Sarvam STT language_code null bug ---
 import livekit.plugins.sarvam.stt as sarvam_stt
@@ -34,7 +41,10 @@ sarvam_stt.SpeechStream._handle_transcript_data = _patched_handle_transcript_dat
 
 BASE_DIR = Path(__file__).parent
 CREDS_PATH = str(BASE_DIR / "creds.json")
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDS_PATH
+
+# Set GOOGLE_APPLICATION_CREDENTIALS if file exists
+if os.path.exists(CREDS_PATH):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDS_PATH
 
 # Use gemini-flash-latest as gemini-1.5-flash was reporting 404 in this environment
 GEMINI_MODEL = "gemini-flash-latest"
@@ -70,7 +80,24 @@ def init_google_sheets():
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
         ]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_PATH, scope)
+        
+        # Check environment variable first (for production)
+        json_creds = os.environ.get("GOOGLE_SHEETS_JSON")
+        if json_creds:
+            try:
+                creds_dict = json.loads(json_creds)
+                creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+                logger.info("Initialized Google Sheets using GOOGLE_SHEETS_JSON environment variable")
+            except Exception as json_err:
+                logger.error(f"Failed to parse GOOGLE_SHEETS_JSON: {json_err}")
+                return None
+        elif os.path.exists(CREDS_PATH):
+            creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_PATH, scope)
+            logger.info(f"Initialized Google Sheets using {CREDS_PATH}")
+        else:
+            logger.error("No Google Sheets credentials found (creds.json or GOOGLE_SHEETS_JSON)")
+            return None
+
         client = gspread.authorize(creds)
         sh = client.open(SPREADSHEET_NAME)
         sheets = {
