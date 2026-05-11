@@ -1,3 +1,13 @@
-.env
-venv311
+# Secrets
+creds.json
+
+# Logs and Temp files
+*.log
+*.txt
+scratch/
+
+# Python environment
+venv/
+venv311/
 __pycache__/
+.env
