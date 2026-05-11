@@ -5,6 +5,20 @@ telugu-agent-main/.env
 telugu-agent-main/.vscode/
 *.pyc
 
+# Secrets
+creds.json
+telugu-agent-main/creds.json
+
+# Logs and Temp files
+*.log
+*.txt
+scratch/
+telugu-agent-main/scratch/
+
+# Python environment
+venv/
+__pycache__/
+
 # Node.js
 telugu-web-main/node_modules/
 telugu-web-main/.next/

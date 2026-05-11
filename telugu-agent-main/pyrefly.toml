@@ -1,2 +1,5 @@
 python-interpreter = "venv311/Scripts/python.exe"
-search-path = ["venv311/Lib/site-packages"]
+site-package-path = ["venv311/Lib/site-packages"]
+
+[errors]
+untyped-import = false

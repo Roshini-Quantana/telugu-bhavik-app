@@ -92,6 +92,11 @@ export default function Home() {
 
   const connect = useCallback(async () => {
     try {
+      // Check for Secure Context / getUserMedia support
+      if (typeof window !== "undefined" && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)) {
+        throw new Error("Microphone access is blocked. Please use 'localhost' or an HTTPS connection to enable voice features.");
+      }
+
       setStatus("fetching");
       setErrorMsg("");
       const res = await fetch("/api/livekit/token");
@@ -118,13 +123,15 @@ export default function Home() {
       // ✅ Wrap LiveKitRoom in our own centering div
       <PageWrapper>
         <LiveKitRoom
+          key={token}
           token={token}
           serverUrl={wsUrl}
           connect={true}
           audio={true}
           video={false}
+          onConnected={() => console.log("Connected to room!")}
           onDisconnected={handleDisconnected}
-          style={{ display: "contents" }} // ← makes LiveKitRoom's div invisible to layout
+          onError={(e) => console.error("LiveKitRoom Error:", e)}
         >
           <AgentUI onDisconnect={handleDisconnected} />
         </LiveKitRoom>
