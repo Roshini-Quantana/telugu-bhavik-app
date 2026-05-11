@@ -581,6 +581,9 @@ async def entrypoint(ctx: JobContext):
     print("--- SESSION STARTED ---")
     logger.info("Agent session is live")
 
+    # Trigger the greeting immediately after starting the session
+    asyncio.create_task(agent.on_enter())
+
 
 if __name__ == "__main__":
     http_port = int(os.environ.get("AGENT_HTTP_PORT", "0"))
@@ -588,6 +591,7 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             port=http_port,
+            agent_name="telugu-bhavik",
             num_idle_processes=1,
             load_threshold=1.5,
         )
