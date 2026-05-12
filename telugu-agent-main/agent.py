@@ -126,7 +126,10 @@ def sync_headers(state):
             await asyncio.to_thread(sheets["call_logs"].update, values=[CALL_LOG_HEADERS], range_name="A1")
             logger.info("Google Sheet headers synchronized successfully")
         
-        asyncio.create_task(_sync())
+        task = asyncio.create_task(_sync())
+        if "bg_tasks" in state:
+            state["bg_tasks"].add(task)
+            task.add_done_callback(state["bg_tasks"].discard)
     except Exception as e:
         logger.warning(f"Header sync failed: {e}")
 
@@ -510,7 +513,7 @@ Stay friendly and conversational in Telugu.
                     if msgs:
                         msgs[0].content = new_instr
                         if hasattr(self, "update_chat_ctx"):
-                            self.update_chat_ctx(ctx)
+                            await self.update_chat_ctx(ctx)
                         else:
                             logger.warning("Agent missing update_chat_ctx method")
                 except Exception as e:
@@ -551,7 +554,7 @@ Stay friendly and conversational in Telugu.
                 ctx.add_message(role="assistant", content=greeting)
                 # Some versions use update_chat_ctx, others might just allow assigning if it's a property
                 if hasattr(self, "update_chat_ctx"):
-                    self.update_chat_ctx(ctx)
+                    await self.update_chat_ctx(ctx)
                 else:
                     # Fallback for other versions
                     self.chat_ctx.messages.append(ctx.messages[-1])
@@ -671,10 +674,11 @@ async def entrypoint(ctx: JobContext):
     print("--- SESSION STARTED ---")
     logger.info("Agent session is live")
 
-    # Trigger the greeting immediately after starting the session
-    task_greet = asyncio.create_task(agent.on_enter())
-    state["bg_tasks"].add(task_greet)
-    task_greet.add_done_callback(state["bg_tasks"].discard)
+    # The Agent class automatically calls on_enter() when the session starts.
+    # Manual call removed to prevent double intro.
+    # task_greet = asyncio.create_task(agent.on_enter())
+    # state["bg_tasks"].add(task_greet)
+    # task_greet.add_done_callback(state["bg_tasks"].discard)
 
     # Wait for the session to finish (this blocks until participant leaves or disconnect)
     # The session.start() might return when the session is over, but we should also check room state
