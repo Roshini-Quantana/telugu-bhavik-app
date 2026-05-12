@@ -131,7 +131,18 @@ export default function Home() {
           video={false}
           onConnected={() => console.log("Connected to room!")}
           onDisconnected={handleDisconnected}
-          onError={(e) => console.error("LiveKitRoom Error:", e)}
+          onError={(e) => {
+            console.error("LiveKitRoom Error:", e);
+            setErrorMsg(`Connection error: ${e.message}`);
+            setStatus("error");
+          }}
+          options={{
+            publishDefaults: {
+              dtx: true,
+              red: true,
+            },
+            adaptiveStream: true,
+          }}
           style={{ display: "flex", justifyContent: "center", alignItems: "center", width: "100%", height: "100%" }}
         >
           <AgentUI onDisconnect={handleDisconnected} />

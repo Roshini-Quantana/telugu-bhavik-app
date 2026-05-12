@@ -482,8 +482,19 @@ After all verification is done, provide a clear SUMMARY of everything we collect
 
 Stay friendly and conversational in Telugu.
 """
-            if self.chat_ctx and self.chat_ctx.messages:
-                self.chat_ctx.messages[0].content = new_instr
+            if self.chat_ctx:
+                try:
+                    ctx = self.chat_ctx.copy()
+                    # Check if messages is a method or a property
+                    msgs = ctx.messages() if callable(ctx.messages) else ctx.messages
+                    if msgs:
+                        msgs[0].content = new_instr
+                        if hasattr(self, "update_chat_ctx"):
+                            self.update_chat_ctx(ctx)
+                        else:
+                            logger.warning("Agent missing update_chat_ctx method")
+                except Exception as e:
+                    logger.warning(f"Failed to update chat context in mode transition: {e}")
             
             # Log the mode change to Google Sheets
             sheets = self.state.get("sheets")
@@ -502,11 +513,32 @@ Stay friendly and conversational in Telugu.
             logger.warning(f"safe_reply failed: {e}")
 
     async def on_enter(self):
+        if self.state.get("greeted"):
+            logger.info("on_enter called but already greeted, skipping.")
+            return
+        self.state["greeted"] = True
+        
         print("--- BHAVIK ENTERED ROOM ---")
         logger.info(f"--- BHAVIK ENTERED ROOM (Call ID: {self.state['call_id']}) ---")
-        await self.safe_reply(
-            "నమస్తే! వృద్ధి హౌసింగ్ లోన్స్ నుంచి మాట్లాడుతున్నాను. మా లోన్స్ సుమారు పద్నాలుగు నుండి పదిహేను శాతం వడ్డీతో ఉంటాయి. మీ పేరు చెప్పండి."
-        )
+        
+        greeting = "నమస్తే! వృద్ధి హౌసింగ్ లోన్స్ నుంచి మాట్లాడుతున్నాను. మా లోన్స్ సుమారు పద్నాలుగు నుండి పదిహేను శాతం వడ్డీతో ఉంటాయి. మీ పేరు చెప్పండి."
+        
+        # Add to chat context so the LLM knows it has already greeted the user
+        if self.chat_ctx:
+            try:
+                # Based on the error: use .copy() and update_chat_ctx()
+                ctx = self.chat_ctx.copy()
+                ctx.add_message(role="assistant", content=greeting)
+                # Some versions use update_chat_ctx, others might just allow assigning if it's a property
+                if hasattr(self, "update_chat_ctx"):
+                    self.update_chat_ctx(ctx)
+                else:
+                    # Fallback for other versions
+                    self.chat_ctx.messages.append(ctx.messages[-1])
+            except Exception as ctx_err:
+                logger.warning(f"Failed to update chat context: {ctx_err}")
+            
+        await self.safe_reply(greeting)
         print("--- GREETING TRIGGERED ---")
         logger.info("Greeting generation triggered")
 
