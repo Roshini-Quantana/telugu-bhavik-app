@@ -152,6 +152,7 @@ async def upsert_row(state, table, data, headers):
     sheets = state.get("sheets")
     lock = state["lock"]
     call_id = state.get("call_id")
+    row_indices = state.setdefault("row_indices", {})
 
     if not sheets or table not in sheets:
         logger.warning(f"upsert_row skipped: sheets not ready (table={table})")
@@ -161,19 +162,37 @@ async def upsert_row(state, table, data, headers):
         ws = sheets[table]
         row = build_row(data, headers)
         
-        # Always search the sheet for the call_id to ensure no duplicates
-        ids = ws.col_values(1)
+        # Check if we already know the row index for this call_id
+        row_idx = row_indices.get(table)
+        
+        if not row_idx:
+            # Search the sheet for the call_id
+            try:
+                ids = ws.col_values(1)
+                if call_id in ids:
+                    row_idx = ids.index(call_id) + 1
+                    row_indices[table] = row_idx
+            except Exception as search_err:
+                logger.warning(f"Error searching for call_id in {table}: {search_err}")
+
         try:
-            row_idx = ids.index(call_id) + 1
-            ws.update(values=[row], range_name=f"A{row_idx}")
-            logger.info(f"Updated {table} row {row_idx} for {call_id}")
-        except ValueError:
-            ws.append_row(row)
-            logger.info(f"Appended new {table} row for {call_id}")
+            if row_idx:
+                ws.update(values=[row], range_name=f"A{row_idx}")
+                logger.info(f"Updated {table} row {row_idx} for {call_id}")
+            else:
+                # Append and get the new row index
+                res = ws.append_row(row)
+                # Some gspread versions return info about the updated range
+                # If we can't easily get the index, we'll just search next time
+                logger.info(f"Appended new {table} row for {call_id}")
+        except Exception as update_err:
+            logger.error(f"Failed to update/append in {table}: {update_err}")
 
     async with lock:
         try:
+            logger.info(f"Starting upsert for table {table} and call_id {call_id}")
             await asyncio.to_thread(_do)
+            logger.info(f"Finished upsert for table {table}")
         except Exception as e:
             logger.exception(f"Sync {table} failed: {e}")
 
@@ -208,6 +227,7 @@ async def append_call_log(state, mode, lead_type, status):
 # ----------------------------------------------------------------------
 async def extract_and_sync(state, text):
     try:
+        logger.info(f"extract_and_sync triggered for text: {text[:50]}...")
         # Wait for sheets to be ready, but don't loop forever if it failed
         while state.get("sheets") is None:
             if state.get("sheets_failed"):
