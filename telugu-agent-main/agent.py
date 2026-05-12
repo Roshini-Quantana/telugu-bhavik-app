@@ -578,14 +578,20 @@ Stay friendly and conversational in Telugu.
             return
 
         logger.info(f"USER: {text}")
-        asyncio.create_task(append_transcript(self.state, "user", text))
+        task_user = asyncio.create_task(append_transcript(self.state, "user", text))
+        if "bg_tasks" in self.state:
+            self.state["bg_tasks"].add(task_user)
+            task_user.add_done_callback(self.state["bg_tasks"].discard)
         
         # Run extraction and transition check in the BACKGROUND to avoid delay
         async def background_logic():
             await extract_and_sync(self.state, text)
             await self._check_mode_transition(text)
 
-        asyncio.create_task(background_logic())
+        task = asyncio.create_task(background_logic())
+        if "bg_tasks" in self.state:
+            self.state["bg_tasks"].add(task)
+            task.add_done_callback(self.state["bg_tasks"].discard)
 
         # CRITICAL: Call super to trigger automatic reply generation IMMEDIATELY
         await super().on_user_turn_completed(turn_ctx, new_message)
@@ -635,6 +641,9 @@ async def entrypoint(ctx: JobContext):
 
     agent = BhavikAgent(state)
     session = AgentSession()
+    
+    # Track background tasks to ensure they finish before exit
+    state["bg_tasks"] = set()
 
     @session.on("conversation_item_added")
     def _on_item(ev):
@@ -650,9 +659,11 @@ async def entrypoint(ctx: JobContext):
             if role == "assistant" and text:
                 logger.info(f"BHAVIK: {text}")
                 state["last_assistant_message"] = str(text)
-                asyncio.create_task(
+                task = asyncio.create_task(
                     append_transcript(state, "assistant", str(text))
                 )
+                state["bg_tasks"].add(task)
+                task.add_done_callback(state["bg_tasks"].discard)
         except Exception as e:
             logger.exception(f"transcript hook err: {e}")
 
@@ -661,7 +672,20 @@ async def entrypoint(ctx: JobContext):
     logger.info("Agent session is live")
 
     # Trigger the greeting immediately after starting the session
-    asyncio.create_task(agent.on_enter())
+    task_greet = asyncio.create_task(agent.on_enter())
+    state["bg_tasks"].add(task_greet)
+    task_greet.add_done_callback(state["bg_tasks"].discard)
+
+    # Wait for the session to finish (this blocks until participant leaves or disconnect)
+    # The session.start() might return when the session is over, but we should also check room state
+    while ctx.room.connection_state == "connected":
+        await asyncio.sleep(1)
+
+    # GRACEFUL SHUTDOWN: Wait for pending background tasks (like Google Sheets sync)
+    if state["bg_tasks"]:
+        logger.info(f"Waiting for {len(state['bg_tasks'])} background sync tasks to finish...")
+        await asyncio.gather(*state["bg_tasks"], return_exceptions=True)
+        logger.info("Background tasks finished.")
 
 
 if __name__ == "__main__":
