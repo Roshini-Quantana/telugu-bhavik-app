@@ -25,19 +25,7 @@ if missing_vars:
     # We don't exit here to allow local debugging, but it will likely fail later.
 
 # ----------------------------------------------------------
-# --- Monkeypatch for Sarvam STT language_code null bug ---
-import livekit.plugins.sarvam.stt as sarvam_stt
-_orig_handle_transcript_data = sarvam_stt.SpeechStream._handle_transcript_data
-
-async def _patched_handle_transcript_data(self, data):
-    if "data" in data and isinstance(data["data"], dict):
-        # If Sarvam returns null for language_code, default to te-IN
-        if data["data"].get("language_code") is None:
-            data["data"]["language_code"] = "te-IN"
-    return await _orig_handle_transcript_data(self, data)
-
-sarvam_stt.SpeechStream._handle_transcript_data = _patched_handle_transcript_data
-# ----------------------------------------------------------
+# Using Sarvam services for STT and TTS
 
 BASE_DIR = Path(__file__).parent
 CREDS_PATH = str(BASE_DIR / "creds.json")
@@ -204,6 +192,30 @@ async def append_transcript(state, role, text):
     sheets = state.get("sheets")
     if not sheets or "transcripts" not in sheets:
         return
+    
+    # FOR USER: Translate to English and SAVE ONLY ENGLISH
+    if role == "user" and any(ord(c) > 127 for c in text):
+        try:
+            llm = google.LLM(model=GEMINI_MODEL)
+            prompt = f"Translate the following Telugu text to English. Return ONLY the translated text:\n\"{text}\""
+            chat_ctx = ChatContext()
+            chat_ctx.add_message(role="user", content=prompt)
+            res = await llm.chat(chat_ctx=chat_ctx)
+            
+            translated = ""
+            async for chunk in res:
+                content = getattr(getattr(chunk, "delta", None), "content", None)
+                if content:
+                    translated += content
+            
+            if translated.strip():
+                logger.info(f"Translated user speech: {text} -> {translated.strip()}")
+                text = translated.strip() # Replace with English
+        except Exception as e:
+            logger.warning(f"Translation failed: {e}")
+
+    # FOR ASSISTANT: Keep exactly as is (Telugu)
+    
     row = [state["call_id"], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), role, text]
     async with state["lock"]:
         try:
@@ -251,8 +263,8 @@ async def extract_and_sync(state, text):
             "4. If the user explicitly states they have NO loans, return 'None' for 'existing_loans'. Otherwise, do not include 'existing_loans' in the JSON.\n"
             "5. If a user mentions their employment status (permanent/contract) but not a role, you can use that for 'job_type' if 'employment_type' is also set.\n"
             "6. 'current_location' = Where they live now. 'property_location' = Where they want to buy property.\n"
-            "7. NEVER translate proper nouns like Names or Locations. Keep them as spoken.\n"
-            "8. Use English for all other values.\n"
+            "7. TRANSLATE and TRANSLITERATE everything to English. Names, locations, and company names MUST be in English characters (e.g., 'Roshini' instead of 'రష్మి').\n"
+            "8. Use English for all values in the JSON.\n"
             f"Agent's last question: \"{last_q}\"\n"
             f"Customer's Reply: \"{text}\""
         )
@@ -314,17 +326,14 @@ async def extract_and_sync(state, text):
         pd = state["pd"]
         pd_updated = False
         for k, v in extracted.items():
-            if v is not None and str(v).strip() != "":
-                v_str = str(v).strip()
+            val = str(v).strip()
+            # Allow overwriting existing values if the new value is not empty or "None"
+            if val and val.lower() not in ["none", "n/a", "unknown"]:
                 if k in LEAD_HEADERS:
-                    curr = lead.get(k, "")
-                    if not curr or curr in ["None", "N/A"] or (v_str != "None" and curr == "None"):
-                        lead[k] = v_str
+                    lead[k] = val
                 if k in PD_HEADERS:
-                    curr = pd.get(k, "")
-                    if not curr or curr in ["None", "N/A"] or (v_str != "None" and curr == "None"):
-                        pd[k] = v_str
-                        pd_updated = True
+                    pd[k] = val
+                    pd_updated = True
 
         sheets = state.get("sheets")
         await upsert_row(state, "lead_details", lead, LEAD_HEADERS)
@@ -456,9 +465,9 @@ IMPORTANT:
 - **PROPER NOUNS**: Use Telugu script for English company names and locations (e.g., 'క్యాప్‌జెమిని' for Capgemini, 'హైటెక్ సిటీ' for Hi-Tech City) to ensure the voice engine pronounces them correctly.
 - **ANTI-REPETITION**: Do not repeat the user's answer multiple times. Acknowledge once and move to the next question immediately.
 """,
-            stt=sarvam.STT(language="te-IN", model="saaras:v2.5"),
+            stt=sarvam.STT(language="te-IN"),
             llm=google.LLM(model=GEMINI_MODEL),
-            tts=sarvam.TTS(target_language_code="te-IN", model="bulbul:v2", speaker="abhilash"),
+            tts=sarvam.TTS(target_language_code="te-IN", speaker="abhilash"),
             vad=silero.VAD.load(),
         )
         self.state = state
@@ -505,20 +514,9 @@ After all verification is done, provide a clear SUMMARY of everything we collect
 
 Stay friendly and conversational in Telugu.
 """
-            if self.chat_ctx:
-                try:
-                    ctx = self.chat_ctx.copy()
-                    # Check if messages is a method or a property
-                    msgs = ctx.messages() if callable(ctx.messages) else ctx.messages
-                    if msgs:
-                        msgs[0].content = new_instr
-                        if hasattr(self, "update_chat_ctx"):
-                            await self.update_chat_ctx(ctx)
-                        else:
-                            logger.warning("Agent missing update_chat_ctx method")
-                except Exception as e:
-                    logger.warning(f"Failed to update chat context in mode transition: {e}")
-            
+           
+            if self.chat_ctx and self.chat_ctx.messages:
+                self.chat_ctx.messages[0].content = new_instr
             # Log the mode change to Google Sheets
             sheets = self.state.get("sheets")
             if sheets:
@@ -536,32 +534,15 @@ Stay friendly and conversational in Telugu.
             logger.warning(f"safe_reply failed: {e}")
 
     async def on_enter(self):
-        if self.state.get("greeted"):
-            logger.info("on_enter called but already greeted, skipping.")
-            return
-        self.state["greeted"] = True
+        
         
         print("--- BHAVIK ENTERED ROOM ---")
         logger.info(f"--- BHAVIK ENTERED ROOM (Call ID: {self.state['call_id']}) ---")
+        await self.safe_reply(
+            "నమస్తే! వృద్ధి హౌసింగ్ లోన్స్ నుంచి మాట్లాడుతున్నాను. మా లోన్స్ సుమారు పద్నాలుగు నుండి పదిహేను శాతం వడ్డీతో ఉంటాయి. మీ పేరు చెప్పండి."
+        )
         
-        greeting = "నమస్తే! వృద్ధి హౌసింగ్ లోన్స్ నుంచి మాట్లాడుతున్నాను. మా లోన్స్ సుమారు పద్నాలుగు నుండి పదిహేను శాతం వడ్డీతో ఉంటాయి. మీ పేరు చెప్పండి."
         
-        # Add to chat context so the LLM knows it has already greeted the user
-        if self.chat_ctx:
-            try:
-                # Based on the error: use .copy() and update_chat_ctx()
-                ctx = self.chat_ctx.copy()
-                ctx.add_message(role="assistant", content=greeting)
-                # Some versions use update_chat_ctx, others might just allow assigning if it's a property
-                if hasattr(self, "update_chat_ctx"):
-                    await self.update_chat_ctx(ctx)
-                else:
-                    # Fallback for other versions
-                    self.chat_ctx.messages.append(ctx.messages[-1])
-            except Exception as ctx_err:
-                logger.warning(f"Failed to update chat context: {ctx_err}")
-            
-        await self.safe_reply(greeting)
         print("--- GREETING TRIGGERED ---")
         logger.info("Greeting generation triggered")
 
@@ -626,6 +607,7 @@ async def entrypoint(ctx: JobContext):
         "pd": {"call_id": call_id},
         "mode": "SALES",
         "lock": asyncio.Lock(),
+        "bg_tasks": set(),
     }
 
     async def load_sheets():
@@ -645,8 +627,6 @@ async def entrypoint(ctx: JobContext):
     agent = BhavikAgent(state)
     session = AgentSession()
     
-    # Track background tasks to ensure they finish before exit
-    state["bg_tasks"] = set()
 
     @session.on("conversation_item_added")
     def _on_item(ev):
