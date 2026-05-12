@@ -132,6 +132,7 @@ export default function Home() {
           onConnected={() => console.log("Connected to room!")}
           onDisconnected={handleDisconnected}
           onError={(e) => console.error("LiveKitRoom Error:", e)}
+          style={{ display: "flex", justifyContent: "center", alignItems: "center", width: "100%", height: "100%" }}
         >
           <AgentUI onDisconnect={handleDisconnected} />
         </LiveKitRoom>
